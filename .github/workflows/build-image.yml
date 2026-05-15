@@ -44,11 +44,28 @@ jobs:
           echo "Downloading: $FILENAME"
           wget --progress=bar:force -O "$FILENAME" "$URL"
 
-          # Extract based on extension
-          if [[ "$FILENAME" == *.7z.001 || "$FILENAME" == *.7z ]]; then
-            echo "Extracting .7z..."
+          # If multi-part .7z, download remaining parts from same release
+          if [[ "$FILENAME" == *.7z.001 ]]; then
+            BASE_URL="${URL%.*}"  # strip .001
+            PART=2
+            while true; do
+              PART_URL="${BASE_URL}.$(printf '%03d' $PART)"
+              PART_FILE="${FILENAME%001}$(printf '%03d' $PART)"
+              echo "Trying: $PART_URL"
+              if wget --spider -q "$PART_URL" 2>/dev/null; then
+                wget --progress=bar:force -O "$PART_FILE" "$PART_URL"
+                PART=$((PART + 1))
+              else
+                echo "No more parts after part $((PART - 1))"
+                break
+              fi
+            done
+            echo "Extracting .7z multi-part..."
             7z e "$FILENAME"
             FILENAME="${FILENAME%.7z.001}"
+          elif [[ "$FILENAME" == *.7z ]]; then
+            echo "Extracting .7z..."
+            7z e "$FILENAME"
             FILENAME="${FILENAME%.7z}"
           elif [[ "$FILENAME" == *.xz ]]; then
             echo "Extracting .xz..."
