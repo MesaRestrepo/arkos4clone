@@ -1,0 +1,80 @@
+name: Build ArkOS4Clone Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      arkos_image_url:
+        description: "Direct URL to ArkOS .img or .img.xz source image"
+        required: true
+        type: string
+      image_type:
+        description: "Image type"
+        required: true
+        default: "ArkOS"
+        type: choice
+        options:
+          - ArkOS
+          - dArkOS
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            parted rsync xz-utils wget unzip \
+            util-linux kpartx e2fsprogs p7zip-full
+
+      - name: Download source image
+        run: |
+          URL="${{ github.event.inputs.arkos_image_url }}"
+          FILENAME="${URL##*/}"
+          echo "Downloading: $FILENAME"
+          wget --progress=bar:force -O "$FILENAME" "$URL"
+
+          # Extract based on extension
+          if [[ "$FILENAME" == *.7z.001 || "$FILENAME" == *.7z ]]; then
+            echo "Extracting .7z..."
+            7z e "$FILENAME"
+            FILENAME="${FILENAME%.7z.001}"
+            FILENAME="${FILENAME%.7z}"
+          elif [[ "$FILENAME" == *.xz ]]; then
+            echo "Extracting .xz..."
+            xz -dv "$FILENAME"
+            FILENAME="${FILENAME%.xz}"
+          fi
+
+          echo "IMG_FILE=$(pwd)/$FILENAME" >> "$GITHUB_ENV"
+          ls -lh "$FILENAME"
+
+      - name: Make scripts executable
+        run: chmod +x build_image.sh grow_p2_plus.sh mount_arkos.sh clone_support.sh build_dtb_selector.sh uboot/flash_uboot.sh 2>/dev/null || true
+
+      - name: Build image
+        run: |
+          sudo ./build_image.sh "$IMG_FILE" "${{ github.workspace }}/workdir"
+
+      - name: Show output
+        run: |
+          ls -lh *.img.xz 2>/dev/null || echo "No .img.xz in root"
+          df -h
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ArkOS4Clone-image
+          path: "*.img.xz"
+          retention-days: 7
+          compression-level: 0
